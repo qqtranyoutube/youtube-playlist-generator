@@ -1,21 +1,25 @@
-# streamlit_app.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from datetime import datetime, timedelta
-import os
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="🧘 Meditation YouTube Analyzer — PRO", layout="wide")
 
-# API key from Streamlit secrets
-API_KEY = st.secrets["YOUTUBE_API_KEY"]
+# ---------------- API KEY SETUP ----------------
+API_KEY = st.secrets.get("YOUTUBE_API_KEY", None)
+
+if not API_KEY:
+    st.error("❌ Missing `YOUTUBE_API_KEY` in Streamlit secrets. Please set it in `Secrets`.")
+    st.stop()  # Stop execution so we don’t crash later
+
+# Build YouTube API client only after key exists
 YOUTUBE = build("youtube", "v3", developerKey=API_KEY)
 
 # ---------------- FUNCTIONS ----------------
-def search_meditation_videos_today(api_key):
+def search_meditation_videos_today():
     try:
         published_after = (datetime.utcnow() - timedelta(days=1)).isoformat("T") + "Z"
         request = YOUTUBE.search().list(
@@ -27,17 +31,21 @@ def search_meditation_videos_today(api_key):
             order="date"
         )
         response = request.execute()
-        videos = []
-        for item in response.get("items", []):
-            videos.append({
+        videos = [
+            {
                 "videoId": item["id"]["videoId"],
                 "title": item["snippet"]["title"],
                 "channelTitle": item["snippet"]["channelTitle"],
                 "publishedAt": item["snippet"]["publishedAt"]
-            })
+            }
+            for item in response.get("items", [])
+        ]
         return pd.DataFrame(videos)
     except HttpError as e:
         st.error(f"API Error: {e}")
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Unexpected error in search: {e}")
         return pd.DataFrame()
 
 def get_video_stats(video_ids):
@@ -49,9 +57,8 @@ def get_video_stats(video_ids):
             id=",".join(video_ids)
         )
         response = request.execute()
-        stats = []
-        for item in response.get("items", []):
-            stats.append({
+        stats = [
+            {
                 "videoId": item["id"],
                 "title": item["snippet"]["title"],
                 "views": int(item["statistics"].get("viewCount", 0)),
@@ -59,17 +66,22 @@ def get_video_stats(video_ids):
                 "comments": int(item["statistics"].get("commentCount", 0)),
                 "channelTitle": item["snippet"]["channelTitle"],
                 "publishedAt": item["snippet"]["publishedAt"]
-            })
+            }
+            for item in response.get("items", [])
+        ]
         return pd.DataFrame(stats)
     except HttpError as e:
         st.error(f"API Error: {e}")
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Unexpected error in get_video_stats: {e}")
         return pd.DataFrame()
 
 # ---------------- APP ----------------
 st.title("🧘 Meditation YouTube Analyzer — PRO")
 st.markdown("Analyze today's **meditation videos** on YouTube.")
 
-df_search = search_meditation_videos_today(API_KEY)
+df_search = search_meditation_videos_today()
 
 if df_search.empty:
     st.warning("No videos found for today.")

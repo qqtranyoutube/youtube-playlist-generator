@@ -1,5 +1,5 @@
-google-api-python-client
-requests
-pandas
 streamlit
+google-api-python-client
+pandas
 plotly
+requests

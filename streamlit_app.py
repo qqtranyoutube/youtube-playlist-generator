@@ -1,34 +1,111 @@
+# streamlit_app.py
 import streamlit as st
 import pandas as pd
-from utils.youtube_api import search_videos
-from utils.youtube_suggest import get_suggestions
+import plotly.express as px
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from datetime import datetime, timedelta
+import os
 
-# ---- CONFIG ----
-st.set_page_config(page_title="🎵 YouTube Auto Playlist Generator", layout="wide")
-api_key = st.secrets["YOUTUBE_API_KEY"]
+# ---------------- CONFIG ----------------
+st.set_page_config(page_title="🧘 Meditation YouTube Analyzer — PRO", layout="wide")
 
-st.title("🎵 YouTube Auto Playlist Generator")
-st.write("Type a topic and get suggested playlists instantly.")
+# API key from Streamlit secrets
+API_KEY = st.secrets["YOUTUBE_API_KEY"]
+YOUTUBE = build("youtube", "v3", developerKey=API_KEY)
 
-# --- Dynamic Suggestions ---
-query_input = st.text_input("Enter keyword", placeholder="e.g., meditation music")
+# ---------------- FUNCTIONS ----------------
+def search_meditation_videos_today(api_key):
+    try:
+        published_after = (datetime.utcnow() - timedelta(days=1)).isoformat("T") + "Z"
+        request = YOUTUBE.search().list(
+            part="snippet",
+            maxResults=50,
+            q="meditation",
+            publishedAfter=published_after,
+            type="video",
+            order="date"
+        )
+        response = request.execute()
+        videos = []
+        for item in response.get("items", []):
+            videos.append({
+                "videoId": item["id"]["videoId"],
+                "title": item["snippet"]["title"],
+                "channelTitle": item["snippet"]["channelTitle"],
+                "publishedAt": item["snippet"]["publishedAt"]
+            })
+        return pd.DataFrame(videos)
+    except HttpError as e:
+        st.error(f"API Error: {e}")
+        return pd.DataFrame()
 
-if query_input:
-    suggestions = get_suggestions(query_input)
-    if suggestions:
-        selected_keyword = st.selectbox("Suggestions:", suggestions, index=0)
-    else:
-        selected_keyword = query_input
+def get_video_stats(video_ids):
+    if not video_ids:
+        return pd.DataFrame()
+    try:
+        request = YOUTUBE.videos().list(
+            part="statistics,snippet",
+            id=",".join(video_ids)
+        )
+        response = request.execute()
+        stats = []
+        for item in response.get("items", []):
+            stats.append({
+                "videoId": item["id"],
+                "title": item["snippet"]["title"],
+                "views": int(item["statistics"].get("viewCount", 0)),
+                "likes": int(item["statistics"].get("likeCount", 0)),
+                "comments": int(item["statistics"].get("commentCount", 0)),
+                "channelTitle": item["snippet"]["channelTitle"],
+                "publishedAt": item["snippet"]["publishedAt"]
+            })
+        return pd.DataFrame(stats)
+    except HttpError as e:
+        st.error(f"API Error: {e}")
+        return pd.DataFrame()
+
+# ---------------- APP ----------------
+st.title("🧘 Meditation YouTube Analyzer — PRO")
+st.markdown("Analyze today's **meditation videos** on YouTube.")
+
+df_search = search_meditation_videos_today(API_KEY)
+
+if df_search.empty:
+    st.warning("No videos found for today.")
 else:
-    st.info("Start typing to see YouTube keyword suggestions...")
-    selected_keyword = None
+    st.subheader("📊 Search Results (Past 24h)")
+    st.dataframe(df_search)
 
-# --- Search & Playlist Generation ---
-if selected_keyword:
-    df = search_videos(api_key, selected_keyword, max_results=10)
-    st.subheader(f"Videos for: {selected_keyword}")
-    st.dataframe(df)
+    video_ids = df_search["videoId"].tolist()
+    df_stats = get_video_stats(video_ids)
 
-    if not df.empty:
-        playlist_url = "https://www.youtube.com/watch_videos?video_ids=" + ",".join(df["videoId"].tolist())
-        st.markdown(f"[▶ Open Playlist in YouTube]({playlist_url})")
+    if not df_stats.empty:
+        st.subheader("🔥 Video Stats")
+        st.dataframe(df_stats)
+
+        # Top 10 by views
+        top_videos = df_stats.sort_values("views", ascending=False).head(10)
+        fig = px.bar(
+            top_videos,
+            x="views",
+            y="title",
+            orientation="h",
+            title="Top 10 Meditation Videos (by views)",
+            text="views"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Views over time
+        df_stats["publishedAt"] = pd.to_datetime(df_stats["publishedAt"])
+        fig_time = px.scatter(
+            df_stats,
+            x="publishedAt",
+            y="views",
+            size="views",
+            color="channelTitle",
+            title="Views vs. Publish Time"
+        )
+        st.plotly_chart(fig_time, use_container_width=True)
+    else:
+        st.warning("No stats available for these videos.")

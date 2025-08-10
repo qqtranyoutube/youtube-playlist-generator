@@ -1,29 +1,44 @@
-
 # utils/youtube_suggest.py
 
 import requests
+import streamlit as st
 
-def get_suggestions(query: str) -> list:
-    """
-    Fetch YouTube search suggestions for a given query using YouTube's autocomplete API.
-    Returns a list of suggestion strings.
-    """
-    if not query.strip():
-        return []
+SUGGEST_URL = "https://suggestqueries.google.com/complete/search"
 
-    url = "http://suggestqueries.google.com/complete/search"
-    params = {
-        "client": "firefox",  # returns JSON
-        "ds": "yt",           # restrict to YouTube
-        "q": query
-    }
+def get_suggestions(query: str):
+    """Fetch YouTube search suggestions with detailed debug logging in Streamlit."""
+    
+    st.write(f"🔍 Debug: Fetching suggestions for `{query}`")
 
     try:
-        resp = requests.get(url, params=params, timeout=5)
-        resp.raise_for_status()
+        params = {
+            "client": "firefox",
+            "ds": "yt",  # Restrict suggestions to YouTube
+            "q": query
+        }
+
+        # Log request details
+        st.write(f"🌐 Debug: Requesting {SUGGEST_URL} with params {params}")
+
+        # Perform GET request
+        resp = requests.get(SUGGEST_URL, params=params, timeout=5)
+        st.write(f"📡 Debug: HTTP Status Code {resp.status_code}")
+
+        resp.raise_for_status()  # Trigger error for non-200 codes
+
+        # Parse JSON
         data = resp.json()
-        # data[1] contains the list of suggestion strings
-        return data[1] if len(data) > 1 else []
+        st.write(f"📦 Debug: Raw API response: {data}")
+
+        # Validate and extract suggestions
+        if isinstance(data, list) and len(data) > 1 and isinstance(data[1], list):
+            suggestions = data[1]
+            st.write(f"✅ Debug: Parsed suggestions: {suggestions}")
+            return suggestions
+        else:
+            st.warning("⚠️ Debug: Unexpected API response format.")
+            return []
+
     except Exception as e:
-        print(f"Error fetching suggestions: {e}")
+        st.error(f"❌ Error in get_suggestions: {e}")
         return []
